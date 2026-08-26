@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Status {{ code }} — Aqua Gems{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Status · {{ code }}</h1>
+  <p class="lead">Type: <strong>{{ entry.type }}</strong></p>
+
+  <table style="width:100%; border-collapse: collapse; font-size: 0.95rem;">
+    <tr>
+      <td style="padding: 8px 0; color: var(--muted);">Status</td>
+      <td style="padding: 8px 0;">
+        {% if entry.status in ['completed', 'paid'] %}
+          <span class="tag ok">{{ entry.status }}</span>
+        {% elif entry.status in ['waiting', 'pending'] %}
+          <span class="tag wait">{{ entry.status }}</span>
+        {% else %}
+          <span class="tag">{{ entry.status }}</span>
+        {% endif %}
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 8px 0; color: var(--muted);">Amount</td>
+      <td style="padding: 8px 0;"><strong>{{ format_amount(entry.amount) }}</strong></td>
+    </tr>
+    <tr>
+      <td style="padding: 8px 0; color: var(--muted);">Roblox</td>
+      <td style="padding: 8px 0;">{{ entry.roblox_username }}</td>
+    </tr>
+    <tr>
+      <td style="padding: 8px 0; color: var(--muted);">Created</td>
+      <td style="padding: 8px 0;">{{ entry.created_at }}</td>
+    </tr>
+    {% if entry.completed_at %}
+    <tr>
+      <td style="padding: 8px 0; color: var(--muted);">Completed</td>
+      <td style="padding: 8px 0;">{{ entry.completed_at }}</td>
+    </tr>
+    {% endif %}
+  </table>
+
+  <p style="margin-top: 24px;">
+    <a href="{{ url_for('index') }}" class="btn btn-primary">Home</a>
+  </p>
+</div>
+{% endblock %}

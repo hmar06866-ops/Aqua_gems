@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Withdraw — Aqua Gems{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>💸 Withdraw Diamonds</h1>
+  <p class="lead">
+    Request a withdrawal. Balance is held immediately; the bot sends diamonds
+    in-game to your Roblox account.
+  </p>
+
+  <form method="post">
+    <label for="roblox_username">Your Roblox username (receive diamonds here)</label>
+    <input id="roblox_username" name="roblox_username" placeholder="Exact Roblox username" required />
+
+    <label for="amount">Amount (e.g. 100m, 1b)</label>
+    <input id="amount" name="amount" placeholder="100m" required />
+
+    <label for="discord_id">Discord User ID (optional if already verified)</label>
+    <input id="discord_id" name="discord_id" placeholder="123456789012345678" />
+
+    <button type="submit" class="btn btn-gold btn-block">Request Withdraw</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Notes</h2>
+  <p style="color: var(--muted); font-size: 0.9rem;">
+    • You must have enough casino balance and no remaining wager lock.<br>
+    • Minimum withdraw: <strong>{{ min_amount }}</strong>.<br>
+    • Diamonds are sent from <strong>{{ bot_username }}</strong> via mail/trade.
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Deposit — Aqua Gems{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>💎 Deposit Diamonds</h1>
+  <p class="lead">
+    Create a deposit request. You’ll receive a unique code to include when
+    trading/mailing diamonds to <strong>{{ bot_username }}</strong>.
+  </p>
+
+  <form method="post">
+    <label for="roblox_username">Your Roblox username</label>
+    <input id="roblox_username" name="roblox_username" placeholder="Exact Roblox username" required autocomplete="off" />
+
+    <label for="amount">Amount (e.g. 100m, 1.5b)</label>
+    <input id="amount" name="amount" placeholder="100m" required />
+
+    <label for="discord_id">Discord User ID (optional if already verified)</label>
+    <input id="discord_id" name="discord_id" placeholder="123456789012345678" />
+
+    <button type="submit" class="btn btn-green btn-block">Create Deposit Request</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Notes</h2>
+  <p style="color: var(--muted); font-size: 0.9rem;">
+    • We verify your username with the official Roblox + Big Games APIs.<br>
+    • Your Roblox account must already be verified in the Discord server.<br>
+    • Minimum deposit: <strong>{{ min_amount }}</strong>.
+  </p>
+</div>
+{% endblock %}

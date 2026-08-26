@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Player Lookup — Aqua Gems{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>🔍 Player Lookup</h1>
+  <p class="lead">
+    Resolve a Roblox username with the official Roblox API + Big Games PS99 API
+    (<code>ps99.biggamesapi.io/v1/players/…</code>).
+  </p>
+
+  <form method="post">
+    <label for="username">Roblox username</label>
+    <input id="username" name="username" value="{{ username }}" placeholder="Exact username" required />
+    <button type="submit" class="btn btn-primary btn-block">Lookup</button>
+  </form>
+</div>
+
+{% if result %}
+<div class="card">
+  {% if result.ok %}
+    <h2>{{ result.roblox_name }}</h2>
+    <p style="color: var(--muted); margin-bottom: 12px;">
+      Display: {{ result.display_name }} · ID: <code>{{ result.roblox_id }}</code>
+    </p>
+
+    <p>
+      Public diamonds (Big Games API):
+      {% if result.public_diamonds is not none %}
+        <strong>{{ "{:,}".format(result.public_diamonds) }}</strong>
+      {% else %}
+        <span class="tag">private / unavailable</span>
+      {% endif %}
+    </p>
+
+    <p style="margin-top: 12px;">
+      Casino linked:
+      {% if result.casino_linked %}
+        <span class="tag ok">yes</span>
+        · Balance: <strong>{{ result.casino_balance }}</strong>
+        · Discord ID: <code>{{ result.casino_user_id }}</code>
+      {% else %}
+        <span class="tag">not linked</span>
+      {% endif %}
+    </p>
+  {% else %}
+    <p class="flash error">{{ result.error }}</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- Discord / social preview -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Aqua Gems" />
+<meta property="og:title" content="Aqua Gems — PS99 Casino" />
+<meta property="og:description" content="Auto deposit & withdraw for Pet Simulator 99. Secure diamond vault linked to Discord." />
+<meta property="og:url" content="https://aqua-gems.com/" />
+<meta property="og:image" content="https://aqua-gems.com/static/logo.png" />
+<meta property="og:image:width" content="512" />
+<meta property="og:image:height" content="512" />
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Aqua Gems — PS99 Casino" />
+<meta name="twitter:description" content="Auto deposit & withdraw for Pet Simulator 99." />
+<meta name="twitter:image" content="https://aqua-gems.com/static/logo.png" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Aqua Gems Casino{% endblock %}</title>
+  <style>
+    :root {
+      --bg: #0b0e17;
+      --card: #141a2a;
+      --border: #1e2740;
+      --accent: #5b8cff;
+      --green: #3dd68c;
+      --red: #ff5c7a;
+      --gold: #f5c542;
+      --text: #e8ecf5;
+      --muted: #8b95b0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: radial-gradient(ellipse at top, #12182b 0%, var(--bg) 60%);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px 60px; }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 0 28px; border-bottom: 1px solid var(--border); margin-bottom: 28px;
+    }
+    .logo { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; }
+    .logo span { color: var(--accent); }
+    nav a {
+      margin-left: 18px; color: var(--muted); font-size: 0.95rem; font-weight: 500;
+    }
+    nav a:hover { color: var(--text); text-decoration: none; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 20px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+    }
+    h1 { font-size: 1.6rem; margin-bottom: 8px; }
+    h2 { font-size: 1.2rem; margin-bottom: 12px; color: var(--gold); }
+    p.lead { color: var(--muted); margin-bottom: 22px; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+    input, select {
+      width: 100%; padding: 12px 14px; border-radius: 10px;
+      border: 1px solid var(--border); background: #0d1220; color: var(--text);
+      font-size: 1rem; margin-bottom: 16px;
+    }
+    input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .btn {
+      display: inline-block; padding: 12px 22px; border-radius: 10px;
+      border: none; font-weight: 600; font-size: 0.95rem; cursor: pointer;
+      transition: transform 0.1s, opacity 0.15s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: linear-gradient(135deg, #4a7dff, #6b5cff); color: #fff; }
+    .btn-green { background: linear-gradient(135deg, #2ecf7a, #1a9e5c); color: #fff; }
+    .btn-gold { background: linear-gradient(135deg, #f5c542, #d4a017); color: #1a1200; }
+    .btn-block { width: 100%; text-align: center; }
+    .flash {
+      padding: 12px 16px; border-radius: 10px; margin-bottom: 16px; font-size: 0.95rem;
+    }
+    .flash.error { background: rgba(255,92,122,0.15); border: 1px solid var(--red); color: #ffb3c0; }
+    .flash.success { background: rgba(61,214,140,0.12); border: 1px solid var(--green); color: #9ef0c5; }
+    .code-box {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: #0a0e18; border: 1px dashed var(--accent);
+      padding: 16px; border-radius: 12px; font-size: 1.25rem;
+      letter-spacing: 0.08em; text-align: center; margin: 16px 0;
+      color: var(--gold); user-select: all;
+    }
+    .steps { counter-reset: step; list-style: none; }
+    .steps li {
+      position: relative; padding-left: 42px; margin-bottom: 14px; color: var(--muted);
+    }
+    .steps li::before {
+      counter-increment: step; content: counter(step);
+      position: absolute; left: 0; top: 0;
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--accent); color: #fff; font-weight: 700;
+      font-size: 0.85rem; display: flex; align-items: center; justify-content: center;
+    }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } nav a { margin-left: 12px; } }
+    .tag {
+      display: inline-block; padding: 3px 10px; border-radius: 999px;
+      font-size: 0.75rem; font-weight: 600; background: #1e2740; color: var(--muted);
+    }
+    .tag.ok { background: rgba(61,214,140,0.2); color: var(--green); }
+    .tag.wait { background: rgba(245,197,66,0.2); color: var(--gold); }
+    footer { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">🌊 <span>Aqua</span> Gems</div>
+      <nav>
+        <a href="{{ url_for('index') }}">Home</a>
+        <a href="{{ url_for('deposit_page') }}">Deposit</a>
+        <a href="{{ url_for('withdraw_page') }}">Withdraw</a>
+        <a href="{{ url_for('lookup') }}">Lookup</a>
+      </nav>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for cat, msg in messages %}
+          <div class="flash {{ cat }}">{{ msg }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+
+    <footer>
+      Powered by official Big Games PS99 API · Aqua Gems Casino
+    </footer>
+  </div>
+</body>
+</html>

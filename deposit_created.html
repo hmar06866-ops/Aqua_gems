@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Deposit Code — Aqua Gems{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>✅ Deposit request created</h1>
+  <p class="lead">Send <strong>{{ amount }}</strong> diamonds to the bot and include this code.</p>
+
+  <div class="code-box">{{ code }}</div>
+
+  <ol class="steps">
+    <li>Open <strong>Pet Simulator 99</strong> → Trading Plaza or Mailbox.</li>
+    <li>Trade / mail <strong>{{ amount }}</strong> diamonds to
+        <strong>{{ bot_username }}</strong>.</li>
+    <li>Put the code <strong>{{ code }}</strong> in the trade note or mail message.</li>
+    <li>When the bot receives it, your casino balance is credited automatically.</li>
+  </ol>
+
+  {% if public_diamonds is not none %}
+  <p style="margin-top: 16px; color: var(--muted); font-size: 0.9rem;">
+    Big Games public profile shows you currently have
+    <strong>{{ "{:,}".format(public_diamonds) }}</strong> diamonds (if public).
+  </p>
+  {% endif %}
+
+  <p style="margin-top: 20px;">
+    <a href="{{ url_for('status', code=code) }}" class="btn btn-primary">Check status</a>
+    <a href="{{ url_for('deposit_page') }}" class="btn" style="margin-left: 8px; background: #1e2740; color: var(--text);">New deposit</a>
+  </p>
+</div>
+{% endblock %}

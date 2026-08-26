@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Aqua Gems — Home{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>🌊 Aqua Gems Casino</h1>
+  <p class="lead">
+    Auto deposit &amp; withdraw for Pet Simulator 99 diamonds.
+    Player lookup uses the <strong>official Big Games API</strong>
+    (<code>ps99.biggamesapi.io</code>).
+  </p>
+
+  <div class="grid2" style="margin-top: 8px;">
+    <a href="{{ url_for('deposit_page') }}" class="btn btn-green btn-block">💎 Deposit</a>
+    <a href="{{ url_for('withdraw_page') }}" class="btn btn-gold btn-block">💸 Withdraw</a>
+  </div>
+</div>
+
+<div class="card">
+  <h2>How auto deposit works</h2>
+  <ol class="steps">
+    <li>Create a deposit on this site — you get a unique code (e.g. <code>DEP-A1B2C3D4</code>).</li>
+    <li>In PS99, trade or mail <strong>diamonds</strong> to the bot account
+        <strong>{{ bot_username }}</strong> and put that code in the message / note.</li>
+    <li>The in-game Lua bot detects the diamonds and calls our
+        <code>/api/deposit</code> endpoint.</li>
+    <li>Your Discord casino balance is credited instantly (including any active deposit bonus).</li>
+  </ol>
+  <p style="margin-top: 16px; color: var(--muted); font-size: 0.9rem;">
+    Minimum amount: <strong>{{ min_amount }}</strong> gems ·
+    Official API is read-only — the actual transfer happens in-game via trade/mailbox.
+  </p>
+</div>
+
+<div class="card">
+  <h2>Quick links</h2>
+  <p style="color: var(--muted);">
+    <a href="{{ url_for('lookup') }}">🔍 Lookup a Roblox player</a> via Big Games API<br>
+    Check a deposit/withdraw code status at <code>/status/YOUR-CODE</code>
+  </p>
+</div>
+{% endblock %}
