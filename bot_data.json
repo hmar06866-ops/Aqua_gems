@@ -1,0 +1,44 @@
+{
+    "users": {
+        "1537523202459176962": {
+            "roblox_username": "vv2nl",
+            "roblox_id": 6216908602,
+            "verified": true,
+            "avatar_url": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-A91B9F83E076DE03B376AC22EE45F403-Png/150/150/AvatarHeadshot/Png/isCircular",
+            "balance": 1000000000,
+            "earned": 1000000000,
+            "pending_verification": null
+        },
+        "1274742851602878465": {
+            "roblox_username": "",
+            "roblox_id": null,
+            "verified": false,
+            "avatar_url": "",
+            "balance": 0,
+            "earned": 0,
+            "pending_verification": {
+                "username": "Police3g",
+                "roblox_id": 1227325712,
+                "code": "VERIFY-FFF785"
+            }
+        },
+        "1416352795501789294": {
+            "roblox_username": "",
+            "roblox_id": null,
+            "verified": false,
+            "avatar_url": "",
+            "balance": 0,
+            "earned": 0,
+            "pending_verification": null
+        }
+    },
+    "tickets": {},
+    "history": {
+        "1537523202459176962": [
+            {
+                "text": "Added 1b gems",
+                "time": "2026-08-18T18:33:10.567138+00:00"
+            }
+        ]
+    }
+}
