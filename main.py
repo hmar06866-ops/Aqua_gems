@@ -1,572 +1,543 @@
 """
-Aqua Gems Casino — main entry point.
-
-This file only wires everything together. Game logic lives in:
-  mines.py, towers.py, colordice.py, blackjack.py, coinflip.py,
-  slots.py, deposit.py, verification.py, economy.py, tip.py,
-  affiliates.py, admin.py, invite_event.py, plus shared
-  config/data/utils/bot_instance.
+Aqua Gems Casino — Auto Deposit / Withdraw Website
+Imports data_store + biggames_api from THIS folder (Aqua_Website only).
 """
-import asyncio
-import random
-import string
+from __future__ import annotations
 
-import discord
-from discord import app_commands
-from discord.ext import tasks
+import os
+import sys
+import secrets
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 
-from bot_instance import bot, tree
-from config import TOKEN, config
-from data import DATA, save_data, ensure_user
-from utils import normal_embed, get_live_profit_embed
+# ---------------------------------------------------------------------------
+# Force local imports from Aqua_Website/ (not aqua_casino root)
+# ---------------------------------------------------------------------------
+_WEBSITE_DIR = Path(__file__).resolve().parent
+if str(_WEBSITE_DIR) not in sys.path:
+    sys.path.insert(0, str(_WEBSITE_DIR))
 
-# Register all slash commands by importing feature modules
-import admin          # noqa: F401
-import verification   # noqa: F401
-import tip            # noqa: F401
-import economy        # noqa: F401
-import mines          # noqa: F401
-import towers         # noqa: F401
-import colordice      # noqa: F401
-import affiliates     # noqa: F401
-import slots          # noqa: F401
-import deposit        # noqa: F401
-import blackjack      # noqa: F401
-import coinflip       # noqa: F401
-import invite_event   # noqa: F401
-import website_admin  # noqa: F401
+_ROOT = _WEBSITE_DIR.parent  # aqua_casino/
+os.environ.setdefault("CASINO_DATA_FILE", str(_ROOT / "casino_data.json"))
 
-from verification import VerificationPanelView
-from deposit import DepositTicketView, WithdrawTicketView
+# Settings from env only — does NOT use Discord bot config.py
+SECRET_KEY = os.environ.get("SECRET_KEY", "aqua-dev-secret-change-me")
+TRADEBOT_SECRET = os.environ.get("TRADEBOT_SECRET", "aqua-tradebot-secret")
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "aqua-admin-key")
+BOT_ROBLOX_USERNAME = os.environ.get("BOT_ROBLOX_USERNAME", "YourBotUsername")
+HOST = os.environ.get("HOST", "0.0.0.0")
+PORT = int(os.environ.get("PORT", "8080"))
+MIN_AMOUNT = int(os.environ.get("MIN_AMOUNT", "1000000"))
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
+DATA_FILE = os.environ.get("CASINO_DATA_FILE", str(_ROOT / "casino_data.json"))
 
+from flask import (
+    Flask,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    flash,
+    jsonify,
+)
 
-# ============================================================
-# LIVE PROFIT TRACKER
-# ============================================================
+from data_store import (
+    get_data,
+    save_data,
+    ensure_user,
+    find_user_by_roblox_id,
+    find_user_by_roblox_name,
+    parse_amount,
+    format_amount,
+    add_history,
+)
+from biggames_api import lookup_player
 
-@tasks.loop(seconds=5)
-async def update_profit_trackers():
-    """Edits the live profit tracker message in every guild every 5 seconds."""
-    profit_embed = get_live_profit_embed()
-    ids_map = DATA["global_stats"].setdefault("profit_tracker_message_ids", {})
-    changed = False
-
-    for guild in bot.guilds:
-        stats_channel = guild.get_channel(
-            __import__("config", fromlist=["PROFIT_TRACKER_CHANNEL_ID"]).PROFIT_TRACKER_CHANNEL_ID
-        )
-        if not stats_channel:
-            continue
-
-        guild_key = str(guild.id)
-        msg_id = ids_map.get(guild_key)
-
-        try:
-            if msg_id:
-                try:
-                    msg = await stats_channel.fetch_message(msg_id)
-                    await msg.edit(embed=profit_embed)
-                    continue
-                except discord.NotFound:
-                    pass
-
-            new_msg = await stats_channel.send(embed=profit_embed)
-            ids_map[guild_key] = new_msg.id
-            changed = True
-        except Exception as e:
-            print(f"Profit tracker update error in guild {guild.id}: {e}")
-
-    if changed:
-        save_data()
+app = Flask(
+    __name__,
+    template_folder=str(_WEBSITE_DIR / "templates"),
+    static_folder=str(_WEBSITE_DIR / "static"),
+)
+app.secret_key = SECRET_KEY
 
 
-# Make update_profit_trackers available to economy.editprofit
-import economy as _economy
-_economy.update_profit_trackers = update_profit_trackers
+_OFFLINE_FLAG = _WEBSITE_DIR / "OFFLINE.flag"
 
 
-# ============================================================
-# TRIVIA / CHALLENGES
-# ============================================================
+@app.before_request
+def _check_website_offline():
+    path = request.path or ""
+    if path.startswith("/api/") or path.startswith("/static/"):
+        return None
 
-OWNER_ID = 1500198665933820004
-
-TRIVIA_REWARD_NORMAL = 15_000_000
-TRIVIA_REWARD_BOOSTED = 5_000_000
-TRIVIA_ROLE_PING = "<@&1541412570043519076>"
-TRIVIA_TIMEOUT = 60.0
-
-# Boost state
-trivia_boosted = False
-trivia_boosted_by = None  # mention string
-
-
-def _current_reward() -> int:
-    return TRIVIA_REWARD_BOOSTED if trivia_boosted else TRIVIA_REWARD_NORMAL
-
-
-def _format_reward(amount: int) -> str:
-    if amount >= 1_000_000:
-        return f"{amount // 1_000_000}m"
-    return str(amount)
-
-
-def _reward_text() -> str:
-    return f"**{_format_reward(_current_reward())} gems**"
-
-
-def _boost_footer():
-    if trivia_boosted and trivia_boosted_by:
-        return (
-            f"⚡ Trivia boosted by {trivia_boosted_by} — "
-            f"rounds every 1 min • prize {_format_reward(TRIVIA_REWARD_BOOSTED)} gems"
-        )
+    offline = _OFFLINE_FLAG.is_file()
+    if offline:
+        return render_template("maintenance.html"), 503
     return None
 
 
-# --- Challenge banks ---
-
-TRIVIA_QUESTIONS = [
-    ("What is the capital of France?", "paris"),
-    ("What is the capital of Japan?", "tokyo"),
-    ("What is the capital of Italy?", "rome"),
-    ("What is the capital of Spain?", "madrid"),
-    ("What is the capital of Germany?", "berlin"),
-    ("What is the capital of Canada?", "ottawa"),
-    ("What is the capital of Australia?", "canberra"),
-    ("How many continents are there?", "7"),
-    ("How many planets are in our solar system?", "8"),
-    ("What is H2O commonly known as?", "water"),
-    ("What gas do plants absorb from the air?", "carbon dioxide"),
-    ("What is the largest ocean on Earth?", "pacific"),
-    ("What is the tallest mountain in the world?", "everest"),
-    ("How many sides does a hexagon have?", "6"),
-    ("How many sides does an octagon have?", "8"),
-    ("What is 12 × 12?", "144"),
-    ("What colour do you get mixing red and blue?", "purple"),
-    ("What is the freezing point of water in Celsius?", "0"),
-    ("What is the boiling point of water in Celsius?", "100"),
-    ("Who painted the Mona Lisa?", "leonardo da vinci"),
-    ("What year did World War 2 end?", "1945"),
-    ("What is the chemical symbol for gold?", "au"),
-    ("What is the chemical symbol for silver?", "ag"),
-    ("How many hours are in a day?", "24"),
-    ("How many minutes are in an hour?", "60"),
-    ("What is the square root of 81?", "9"),
-    ("What is the square root of 144?", "12"),
-    ("Which planet is known as the Red Planet?", "mars"),
-    ("Which planet is closest to the Sun?", "mercury"),
-    ("What is the largest mammal?", "blue whale"),
-    ("How many legs does a spider have?", "8"),
-    ("How many legs does an insect have?", "6"),
-    ("What do bees make?", "honey"),
-    ("What is the main language spoken in Brazil?", "portuguese"),
-    ("What currency is used in Japan?", "yen"),
-    ("What currency is used in the UK?", "pound"),
-    ("What is the opposite of hot?", "cold"),
-    ("What is the opposite of up?", "down"),
-    ("How many days are in a leap year?", "366"),
-    ("How many days are in a normal year?", "365"),
-    ("What casino game uses a round wheel and a ball?", "roulette"),
-    ("In blackjack, what is the best possible hand?", "21"),
-    ("What do you call two identical cards in poker?", "pair"),
-    ("What colour is the highest value chip often associated with?", "black"),
-    ("What is 2 to the power of 10?", "1024"),
-]
-
-TYPING_PHRASES = [
-    "aqua gems casino",
-    "stack those gems",
-    "jackpot winner",
-    "lucky streak",
-    "high roller",
-    "all in",
-    "double or nothing",
-    "spin to win",
-    "diamond hands",
-    "big win energy",
-    "casino royal",
-    "fortune favors the bold",
-    "type this fast",
-    "quick fingers win",
-    "gems on gems",
-    "aqua is life",
-    "never fold early",
-    "hit or stand",
-    "roll the dice",
-    "flip the coin",
-]
-
-UNSCRAMBLE_WORDS = [
-    "casino", "jackpot", "diamond", "fortune", "winner", "streak",
-    "roulette", "blackjack", "slots", "poker", "gems", "aqua",
-    "lucky", "riches", "bonus", "payout", "dealer", "chip",
-    "spin", "bet", "vault", "treasure", "reward", "prize",
-]
-
-REVERSE_WORDS = [
-    "aqua", "gems", "casino", "lucky", "winner", "jackpot",
-    "diamond", "fortune", "bonus", "streak", "chips", "spin",
-]
-
-EMOJI_SEQUENCES = [
-    ("💎🔥💎", "💎🔥💎"),
-    ("🌊💎🌊", "🌊💎🌊"),
-    ("🎰7️⃣🎰", "🎰7️⃣🎰"),
-    ("🍀💰🍀", "🍀💰🍀"),
-    ("🎲🎲🎲", "🎲🎲🎲"),
-    ("👑💎👑", "👑💎👑"),
-    ("⚡💎⚡", "⚡💎⚡"),
-]
+def _now() -> int:
+    return int(time.time())
 
 
-def _math_challenge():
-    op = random.choice(["+", "-", "*", "add", "sub", "mul"])
-    if op in ("+", "add"):
-        a, b = random.randint(10, 300), random.randint(10, 300)
-        ans = str(a + b)
-        prompt = f"**{a} + {b}**"
-    elif op in ("-", "sub"):
-        a, b = random.randint(50, 400), random.randint(10, 200)
-        if b > a:
-            a, b = b, a
-        ans = str(a - b)
-        prompt = f"**{a} − {b}**"
-    else:
-        a, b = random.randint(4, 25), random.randint(3, 16)
-        ans = str(a * b)
-        prompt = f"**{a} × {b}**"
-    return (
-        "🧮 Math Challenge!",
-        f"First to type the correct answer to {prompt} wins {_reward_text()}!",
-        ans,
-        False,
-        discord.Colour.blue(),
-    )
+def _gen_code(prefix: str = "AQ") -> str:
+    return f"{prefix}-{secrets.token_hex(4).upper()}"
 
 
-def _typing_challenge():
-    phrase = random.choice(TYPING_PHRASES)
-    return (
-        "⌨️ Typing Race!",
-        f"First person to type this **exactly** wins {_reward_text()}:\n\n`{phrase}`",
-        phrase,
-        True,
-        discord.Colour.orange(),
-    )
-
-
-def _trivia_challenge():
-    q, a = random.choice(TRIVIA_QUESTIONS)
-    return (
-        "🧠 Trivia Time!",
-        f"**{q}**\n\nFirst correct answer wins {_reward_text()}!",
-        a,
-        False,
-        discord.Colour.purple(),
-    )
-
-
-def _unscramble_challenge():
-    word = random.choice(UNSCRAMBLE_WORDS)
-    letters = list(word)
-    random.shuffle(letters)
-    scrambled = "".join(letters)
-    if scrambled == word:
-        letters = list(word)
-        random.shuffle(letters)
-        scrambled = "".join(letters)
-    return (
-        "🔀 Unscramble!",
-        f"Unscramble this word: **`{scrambled}`**\n\nFirst correct answer wins {_reward_text()}!",
-        word,
-        False,
-        discord.Colour.green(),
-    )
-
-
-def _reverse_challenge():
-    word = random.choice(REVERSE_WORDS)
-    return (
-        "🔄 Reverse It!",
-        f"Type this word **backwards**: **`{word}`**\n\nFirst correct answer wins {_reward_text()}!",
-        word[::-1],
-        False,
-        discord.Colour.teal(),
-    )
-
-
-def _emoji_challenge():
-    shown, ans = random.choice(EMOJI_SEQUENCES)
-    return (
-        "😎 Emoji Race!",
-        f"First to type this exact emoji sequence wins {_reward_text()}:\n\n{shown}",
-        ans,
-        True,
-        discord.Colour.gold(),
-    )
-
-
-def _count_letters_challenge():
-    word = random.choice(UNSCRAMBLE_WORDS + TYPING_PHRASES)
-    letter = random.choice(list(set(word.replace(" ", ""))))
-    count = word.count(letter)
-    return (
-        "🔢 Count Them!",
-        f"How many times does the letter **`{letter}`** appear in:\n**`{word}`**?\n\nFirst correct number wins {_reward_text()}!",
-        str(count),
-        False,
-        discord.Colour.dark_blue(),
-    )
-
-
-def _sequence_challenge():
-    start = random.randint(2, 12)
-    step = random.randint(2, 7)
-    seq = [start + i * step for i in range(4)]
-    ans = str(seq[-1] + step)
-    shown = ", ".join(str(x) for x in seq) + ", ?"
-    return (
-        "🔢 Next Number!",
-        f"What comes next in the sequence?\n**{shown}**\n\nFirst correct answer wins {_reward_text()}!",
-        ans,
-        False,
-        discord.Colour.dark_purple(),
-    )
-
-
-def _random_string_challenge():
-    length = random.randint(5, 8)
-    chars = string.ascii_lowercase + string.digits
-    code = "".join(random.choice(chars) for _ in range(length))
-    return (
-        "⚡ Code Race!",
-        f"First to type this code **exactly** wins {_reward_text()}:\n\n`{code}`",
-        code,
-        True,
-        discord.Colour.red(),
-    )
-
-
-def _first_to_type_challenge():
-    targets = [
-        ("AQUA", "AQUA"),
-        ("GEMS", "GEMS"),
-        ("WIN", "WIN"),
-        ("GG", "GG"),
-        ("EZ", "EZ"),
-        ("LFG", "LFG"),
-        ("100", "100"),
-        ("777", "777"),
-    ]
-    shown, ans = random.choice(targets)
-    return (
-        "🏁 First to Type!",
-        f"First person to type **`{shown}`** wins {_reward_text()}!",
-        ans,
-        True,
-        discord.Colour.magenta(),
-    )
-
-
-CHALLENGE_MAKERS = [
-    _math_challenge,
-    _math_challenge,
-    _typing_challenge,
-    _typing_challenge,
-    _trivia_challenge,
-    _trivia_challenge,
-    _trivia_challenge,
-    _unscramble_challenge,
-    _reverse_challenge,
-    _emoji_challenge,
-    _count_letters_challenge,
-    _sequence_challenge,
-    _random_string_challenge,
-    _first_to_type_challenge,
-]
-
-
-@tasks.loop(minutes=15)
-async def trivia_loop():
-    channel_id = config.get("channels", {}).get("general")
-    if not channel_id:
+def _notify_discord(title: str, description: str, colour: int = 0x57F287):
+    if not DISCORD_WEBHOOK_URL:
         return
-
-    channel = bot.get_channel(int(channel_id))
-    if not channel:
-        return
-
-    maker = random.choice(CHALLENGE_MAKERS)
-    title, description, answer, case_sensitive, colour = maker()
-
-    if trivia_boosted and trivia_boosted_by:
-        description = (
-            f"⚡ **Trivia boosted by {trivia_boosted_by}**\n"
-            f"*Faster rounds (every 1 min) • smaller prizes ({_format_reward(TRIVIA_REWARD_BOOSTED)} gems)*\n\n"
-            + description
-        )
-
-    embed = normal_embed(title, description, colour)
-    footer = _boost_footer()
-    if footer:
-        embed.set_footer(text=footer)
-
-    await channel.send(content=TRIVIA_ROLE_PING, embed=embed)
-
-    def check(message):
-        if message.channel != channel or message.author.bot:
-            return False
-        content = message.content.strip()
-        if case_sensitive:
-            return content == answer
-        return content.lower() == answer.lower()
-
-    reward = _current_reward()
     try:
-        message = await bot.wait_for("message", check=check, timeout=TRIVIA_TIMEOUT)
-        winner = ensure_user(message.author.id)
-        winner["balance"] += reward
-        save_data()
+        import requests
 
-        await channel.send(
-            f"🎉 {message.author.mention} got it and won **{_format_reward(reward)} gems**!"
+        requests.post(
+            DISCORD_WEBHOOK_URL,
+            json={
+                "embeds": [
+                    {
+                        "title": title,
+                        "description": description,
+                        "color": colour,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                ]
+            },
+            timeout=5,
         )
-    except asyncio.TimeoutError:
-        await channel.send(
-            f"⏳ Time's up! The answer was **`{answer}`**. Nobody won this round."
+    except Exception:
+        pass
+
+
+def _credit_deposit(discord_user_id: str, amount: int, source: str, data: dict) -> dict:
+    user = ensure_user(discord_user_id, data)
+    amount_to_credit = amount
+    bonus_msg = ""
+    active_bonus = data.get("settings", {}).get("active_deposit_bonus")
+    if active_bonus and time.time() < active_bonus.get("expires_at", 0):
+        pct = active_bonus["percentage"]
+        bonus = int(amount * (pct / 100))
+        amount_to_credit += bonus
+        bonus_msg = f" (+{format_amount(bonus)} {pct}% bonus)"
+
+    user["balance"] += amount_to_credit
+    user["deposited"] = user.get("deposited", 0) + amount
+    user["to_wager"] = user.get("to_wager", 0) + amount_to_credit
+    data["global_stats"]["total_deposits"] = (
+        data["global_stats"].get("total_deposits", 0) + amount
+    )
+    add_history(discord_user_id, f"Deposit ({source})", amount, "Approved", data)
+
+    return {
+        "credited": amount_to_credit,
+        "bonus_msg": bonus_msg,
+        "new_balance": user["balance"],
+    }
+
+
+@app.route("/")
+def index():
+    return render_template(
+        "index.html",
+        bot_username=BOT_ROBLOX_USERNAME,
+        min_amount=format_amount(MIN_AMOUNT),
+    )
+
+
+@app.route("/lookup", methods=["GET", "POST"])
+def lookup():
+    result = None
+    username = ""
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        if username:
+            result = lookup_player(username)
+            if result.get("ok"):
+                data = get_data()
+                uid, u = find_user_by_roblox_id(result["roblox_id"], data)
+                if not uid:
+                    uid, u = find_user_by_roblox_name(result["roblox_name"], data)
+                result["casino_user_id"] = uid
+                result["casino_balance"] = format_amount(u["balance"]) if u else None
+                result["casino_linked"] = uid is not None
+    return render_template("lookup.html", result=result, username=username)
+
+
+@app.route("/deposit", methods=["GET", "POST"])
+def deposit_page():
+    if request.method == "POST":
+        roblox_username = (request.form.get("roblox_username") or "").strip()
+        amount_str = (request.form.get("amount") or "").strip()
+        discord_id = (request.form.get("discord_id") or "").strip()
+
+        if not roblox_username or not amount_str:
+            flash("Roblox username and amount are required.", "error")
+            return redirect(url_for("deposit_page"))
+
+        amount = parse_amount(amount_str)
+        if amount is None or amount < MIN_AMOUNT:
+            flash(f"Invalid amount. Minimum is {format_amount(MIN_AMOUNT)}.", "error")
+            return redirect(url_for("deposit_page"))
+
+        info = lookup_player(roblox_username)
+        if not info["ok"]:
+            flash(info.get("error") or "Could not verify Roblox username.", "error")
+            return redirect(url_for("deposit_page"))
+
+        data = get_data()
+        uid = None
+        if discord_id.isdigit():
+            uid = discord_id
+            ensure_user(uid, data)
+        else:
+            uid, _ = find_user_by_roblox_id(info["roblox_id"], data)
+            if not uid:
+                uid, _ = find_user_by_roblox_name(info["roblox_name"], data)
+
+        if not uid:
+            flash(
+                "This Roblox account is not linked in Aqua Casino. "
+                "Verify in Discord first, or provide your Discord user ID.",
+                "error",
+            )
+            return redirect(url_for("deposit_page"))
+
+        user = ensure_user(uid, data)
+        if not user.get("roblox"):
+            user["roblox"] = info["roblox_name"]
+            user["roblox_id"] = info["roblox_id"]
+
+        code = _gen_code("DEP")
+        entry = {
+            "type": "deposit",
+            "user_id": str(uid),
+            "roblox_id": info["roblox_id"],
+            "roblox_username": info["roblox_name"],
+            "amount": amount,
+            "status": "waiting",
+            "created_at": _now(),
+        }
+        data.setdefault("website_codes", {})[code] = entry
+        data.setdefault("pending_deposits", {})[code] = entry
+        save_data(data)
+
+        return render_template(
+            "deposit_created.html",
+            code=code,
+            amount=format_amount(amount),
+            raw_amount=amount,
+            roblox_name=info["roblox_name"],
+            bot_username=BOT_ROBLOX_USERNAME,
+            public_diamonds=info.get("public_diamonds"),
         )
-    except Exception as e:
-        print(f"Trivia loop error: {e}")
+
+    return render_template(
+        "deposit.html",
+        bot_username=BOT_ROBLOX_USERNAME,
+        min_amount=format_amount(MIN_AMOUNT),
+    )
 
 
-@trivia_loop.before_loop
-async def before_trivia_loop():
-    await bot.wait_until_ready()
+@app.route("/withdraw", methods=["GET", "POST"])
+def withdraw_page():
+    if request.method == "POST":
+        roblox_username = (request.form.get("roblox_username") or "").strip()
+        amount_str = (request.form.get("amount") or "").strip()
+        discord_id = (request.form.get("discord_id") or "").strip()
 
+        if not roblox_username or not amount_str:
+            flash("Roblox username and amount are required.", "error")
+            return redirect(url_for("withdraw_page"))
 
-def _can_boost(interaction: discord.Interaction) -> bool:
-    if interaction.user.id == OWNER_ID:
-        return True
-    if isinstance(interaction.user, discord.Member):
-        return interaction.user.guild_permissions.administrator
-    return False
+        amount = parse_amount(amount_str)
+        if amount is None or amount < MIN_AMOUNT:
+            flash(f"Invalid amount. Minimum is {format_amount(MIN_AMOUNT)}.", "error")
+            return redirect(url_for("withdraw_page"))
 
+        info = lookup_player(roblox_username)
+        if not info["ok"]:
+            flash(info.get("error") or "Could not verify Roblox username.", "error")
+            return redirect(url_for("withdraw_page"))
 
-@tree.command(
-    name="trivia_boost",
-    description="Boost trivia to every 1 minute with 2m gem prizes (Admins + owner)",
-)
-@app_commands.describe(
-    enable="Turn boost on or off (default: on)",
-)
-async def trivia_boost_cmd(
-    interaction: discord.Interaction,
-    enable: bool = True,
-):
-    global trivia_boosted, trivia_boosted_by
+        data = get_data()
+        uid = None
+        if discord_id.isdigit():
+            uid = discord_id
+        else:
+            uid, _ = find_user_by_roblox_id(info["roblox_id"], data)
+            if not uid:
+                uid, _ = find_user_by_roblox_name(info["roblox_name"], data)
 
-    if not _can_boost(interaction):
-        await interaction.response.send_message(
-            "❌ You don't have permission to use this command.",
-            ephemeral=True,
+        if not uid:
+            flash("Account not linked. Verify in Discord first.", "error")
+            return redirect(url_for("withdraw_page"))
+
+        user = ensure_user(uid, data)
+        if user["balance"] < amount:
+            flash(
+                f"Insufficient balance. You have {format_amount(user['balance'])}.",
+                "error",
+            )
+            return redirect(url_for("withdraw_page"))
+
+        if user.get("to_wager", 0) > 0:
+            flash(
+                f"You must wager {format_amount(user['to_wager'])} more before withdrawing.",
+                "error",
+            )
+            return redirect(url_for("withdraw_page"))
+
+        user["balance"] -= amount
+        code = _gen_code("WTH")
+        entry = {
+            "type": "withdraw",
+            "user_id": str(uid),
+            "roblox_id": info["roblox_id"],
+            "roblox_username": info["roblox_name"],
+            "amount": amount,
+            "status": "pending",
+            "created_at": _now(),
+            "code": code,
+        }
+        data.setdefault("website_codes", {})[code] = entry
+        data.setdefault("pending_withdraws", {})[code] = entry
+        save_data(data)
+
+        _notify_discord(
+            "💸 Withdraw Requested",
+            f"**User:** <@{uid}>\n**Roblox:** `{info['roblox_name']}`\n"
+            f"**Amount:** {format_amount(amount)}\n**Code:** `{code}`",
+            0xFEE75C,
         )
-        return
 
-    if enable:
-        trivia_boosted = True
-        trivia_boosted_by = interaction.user.mention
-        trivia_loop.change_interval(minutes=1)
-
-        await interaction.response.send_message(
-            f"⚡ **Trivia boosted by {interaction.user.mention}!**\n"
-            f"Rounds now run **every 1 minute** with a **2m gem** prize.\n"
-            f"Use `/trivia_boost enable:False` to turn it off.",
-            ephemeral=False,
-        )
-    else:
-        trivia_boosted = False
-        trivia_boosted_by = None
-        trivia_loop.change_interval(minutes=15)
-
-        await interaction.response.send_message(
-            "✅ Trivia boost disabled. Back to **every 15 minutes** with **15m gem** prizes.",
-            ephemeral=False,
+        return render_template(
+            "withdraw_created.html",
+            code=code,
+            amount=format_amount(amount),
+            roblox_name=info["roblox_name"],
+            bot_username=BOT_ROBLOX_USERNAME,
         )
 
-
-# ============================================================
-# STARTUP
-# ============================================================
-
-STARTUP_COMPLETE = False
-
-
-@bot.event
-async def on_ready():
-    global STARTUP_COMPLETE
-
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-
-    if STARTUP_COMPLETE:
-        return
-
-    STARTUP_COMPLETE = True
-
-    bot.add_view(DepositTicketView())
-    bot.add_view(WithdrawTicketView())
-    bot.add_view(VerificationPanelView())
-
-    if not update_profit_trackers.is_running():
-        update_profit_trackers.start()
-    if not trivia_loop.is_running():
-        trivia_loop.start()
-
-    try:
-        for guild in bot.guilds:
-            bot.tree.clear_commands(guild=guild)
-            await bot.tree.sync(guild=guild)
-
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} global slash command(s).")
-    except Exception as e:
-        STARTUP_COMPLETE = False
-        print(f"Failed to sync slash commands: {e}")
+    return render_template(
+        "withdraw.html",
+        bot_username=BOT_ROBLOX_USERNAME,
+        min_amount=format_amount(MIN_AMOUNT),
+    )
 
 
-def _start_aqua_website():
-    import os
-    import sys
-    from pathlib import Path
+@app.route("/status/<code>")
+def status(code: str):
+    data = get_data()
+    entry = data.get("website_codes", {}).get(code.upper())
+    if not entry:
+        flash("Code not found.", "error")
+        return redirect(url_for("index"))
+    return render_template(
+        "status.html", code=code.upper(), entry=entry, format_amount=format_amount
+    )
 
-    try:
-        root = Path(__file__).resolve().parent
-        website_dir = root / "Aqua_Website"
-        if not website_dir.is_dir():
-            website_dir = root / "aqua_website"
-        if not website_dir.is_dir():
-            print("❌ Aqua_Website folder not found")
-            return
 
-        os.environ.setdefault("CASINO_DATA_FILE", str(root / "casino_data.json"))
-        os.environ.setdefault("HOST", "0.0.0.0")
-        os.environ.setdefault("PORT", "8080")
+@app.route("/api/deposit", methods=["POST"])
+def api_deposit():
+    body = request.get_json(silent=True) or {}
+    secret = body.get("secret") or request.headers.get("X-Tradebot-Secret", "")
+    if secret != TRADEBOT_SECRET:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
 
-        sys.path.insert(0, str(website_dir))
-        from main import app
+    gems = int(body.get("gems") or body.get("amount") or 0)
+    if gems <= 0:
+        return jsonify({"ok": False, "error": "invalid gems amount"}), 400
 
-        port = int(os.environ.get("PORT", "8080"))
-        print(f"🌐 Aqua website starting on port {port}")
-        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-    except Exception as e:
-        print(f"❌ Website error: {e}")
+    data = get_data()
+    code = (body.get("code") or body.get("message") or "").strip().upper()
+    roblox_id = body.get("roblox_id")
+
+    if code and code in data.get("website_codes", {}):
+        entry = data["website_codes"][code]
+        if entry.get("type") != "deposit" or entry.get("status") != "waiting":
+            return jsonify({"ok": False, "error": "code already used or invalid"}), 400
+
+        expected = entry["amount"]
+        if gems < expected * 0.95:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": f"amount too low — expected ~{expected}, got {gems}",
+                }
+            ), 400
+
+        summary = _credit_deposit(entry["user_id"], gems, "Website Auto", data)
+        entry["status"] = "completed"
+        entry["completed_at"] = _now()
+        entry["actual_gems"] = gems
+        data.get("pending_deposits", {}).pop(code, None)
+        save_data(data)
+
+        _notify_discord(
+            "✅ Auto Deposit Credited",
+            f"**User:** <@{entry['user_id']}>\n**Roblox:** `{entry.get('roblox_username')}`\n"
+            f"**Amount:** {format_amount(gems)}{summary['bonus_msg']}\n**Code:** `{code}`",
+        )
+        return jsonify({"ok": True, "credited": summary["credited"], "code": code})
+
+    if roblox_id:
+        uid, user = find_user_by_roblox_id(roblox_id, data)
+        if not uid:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "roblox account not linked to any Discord user",
+                }
+            ), 404
+
+        summary = _credit_deposit(uid, gems, "Tradebot Auto", data)
+        save_data(data)
+        _notify_discord(
+            "✅ Auto Deposit Credited",
+            f"**User:** <@{uid}>\n**Roblox ID:** `{roblox_id}`\n"
+            f"**Amount:** {format_amount(gems)}{summary['bonus_msg']}",
+        )
+        return jsonify({"ok": True, "credited": summary["credited"], "user_id": uid})
+
+    return jsonify({"ok": False, "error": "provide code or roblox_id"}), 400
+
+
+@app.route("/api/pending_withdraws", methods=["GET"])
+def api_pending_withdraws():
+    secret = request.args.get("secret") or request.headers.get("X-Tradebot-Secret", "")
+    if secret != TRADEBOT_SECRET:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    data = get_data()
+    pending = []
+    for code, entry in list(data.get("pending_withdraws", {}).items()):
+        if entry.get("status") == "pending":
+            pending.append(
+                {
+                    "code": code,
+                    "roblox_id": entry["roblox_id"],
+                    "roblox_username": entry["roblox_username"],
+                    "amount": entry["amount"],
+                    "user_id": entry["user_id"],
+                }
+            )
+    return jsonify({"ok": True, "withdraws": pending})
+
+
+@app.route("/api/withdraw_complete", methods=["POST"])
+def api_withdraw_complete():
+    body = request.get_json(silent=True) or {}
+    secret = body.get("secret") or request.headers.get("X-Tradebot-Secret", "")
+    if secret != TRADEBOT_SECRET:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    code = (body.get("code") or "").strip().upper()
+    success = body.get("success", True)
+
+    data = get_data()
+    entry = data.get("website_codes", {}).get(code)
+    if not entry or entry.get("type") != "withdraw":
+        return jsonify({"ok": False, "error": "unknown code"}), 404
+
+    if success:
+        entry["status"] = "paid"
+        entry["completed_at"] = _now()
+        user = ensure_user(entry["user_id"], data)
+        user["withdrawn"] = user.get("withdrawn", 0) + entry["amount"]
+        data["global_stats"]["total_withdraws"] = (
+            data["global_stats"].get("total_withdraws", 0) + entry["amount"]
+        )
+        add_history(entry["user_id"], "Withdraw (Auto)", entry["amount"], "Paid", data)
+        data.get("pending_withdraws", {}).pop(code, None)
+        save_data(data)
+        _notify_discord(
+            "✅ Withdraw Paid",
+            f"**User:** <@{entry['user_id']}>\n**Roblox:** `{entry['roblox_username']}`\n"
+            f"**Amount:** {format_amount(entry['amount'])}\n**Code:** `{code}`",
+        )
+        return jsonify({"ok": True})
+
+    entry["status"] = "failed"
+    user = ensure_user(entry["user_id"], data)
+    user["balance"] += entry["amount"]
+    data.get("pending_withdraws", {}).pop(code, None)
+    save_data(data)
+    return jsonify({"ok": True, "refunded": True})
+
+
+@app.route("/api/simulate_deposit", methods=["POST"])
+def api_simulate_deposit():
+    key = request.headers.get("X-Admin-Key") or (
+        request.get_json(silent=True) or {}
+    ).get("admin_key")
+    if key != ADMIN_API_KEY:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    body = request.get_json(silent=True) or {}
+    data = get_data()
+
+    code = (body.get("code") or "").strip().upper()
+    if code and code in data.get("website_codes", {}):
+        entry = data["website_codes"][code]
+        if entry.get("status") != "waiting":
+            return jsonify({"ok": False, "error": "code not waiting"}), 400
+        gems = int(body.get("gems") or entry["amount"])
+        summary = _credit_deposit(entry["user_id"], gems, "Simulated", data)
+        entry["status"] = "completed"
+        entry["completed_at"] = _now()
+        entry["actual_gems"] = gems
+        data.get("pending_deposits", {}).pop(code, None)
+        save_data(data)
+        return jsonify(
+            {
+                "ok": True,
+                "credited": summary["credited"],
+                "balance": summary["new_balance"],
+            }
+        )
+
+    username = (body.get("roblox_username") or "").strip()
+    gems = int(body.get("gems") or 0)
+    if not username or gems <= 0:
+        return jsonify({"ok": False, "error": "need code or roblox_username+gems"}), 400
+
+    info = lookup_player(username)
+    if not info["ok"]:
+        return jsonify({"ok": False, "error": info.get("error")}), 400
+
+    uid, _ = find_user_by_roblox_id(info["roblox_id"], data)
+    if not uid:
+        uid, _ = find_user_by_roblox_name(info["roblox_name"], data)
+    if not uid:
+        return jsonify({"ok": False, "error": "user not linked in casino"}), 404
+
+    summary = _credit_deposit(uid, gems, "Simulated", data)
+    save_data(data)
+    return jsonify({"ok": True, "credited": summary["credited"], "user_id": uid})
+
+
+@app.route("/api/health")
+def health():
+    data = get_data()
+    return jsonify(
+        {
+            "ok": True,
+            "users": len(data.get("users", {})),
+            "pending_deposits": len(data.get("pending_deposits", {})),
+            "pending_withdraws": len(data.get("pending_withdraws", {})),
+            "big_games_api": "https://ps99.biggamesapi.io",
+            "website_offline": bool(
+                data.get("settings", {}).get("website_offline", False)
+            ),
+        }
+    )
 
 
 if __name__ == "__main__":
-    if not TOKEN:
-        print("❌ ERROR: DISCORD_TOKEN environment variable is missing or empty!")
-    else:
-        import threading
-        threading.Thread(target=_start_aqua_website, daemon=True).start()
-        print("🚀 Starting Aqua Gems Casino (modular)...")
-        bot.run(TOKEN)
+    print("=" * 60)
+    print("🌊 Aqua Gems Casino — Deposit / Withdraw Website")
+    print(f"   Data file : {DATA_FILE}")
+    print(f"   Bot user  : {BOT_ROBLOX_USERNAME}")
+    print(f"   Listening : http://{HOST}:{PORT}")
+    print("=" * 60)
+    app.run(host=HOST, port=PORT, debug=False)

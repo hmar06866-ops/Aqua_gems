@@ -1,68 +1,55 @@
-"""Aqua Gems Casino — configuration & constants."""
-import json
+"""
+Aqua Website — configuration.
+Place this folder as aqua_website/ inside your aqua_casino project.
+It shares the same casino_data.json as the Discord bot.
+"""
 import os
+from pathlib import Path
 
-CONFIG_FILE = "config.json"
-try:
-    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-        config = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    config = {"channels": {}}
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent
 
-TOKEN = os.environ.get("DISCORD_TOKEN") or os.environ.get("TOKEN")
+# When running from aqua_website/ inside aqua_casino/, the data file lives one level up.
+# Override with env CASINO_DATA_FILE if needed.
+DEFAULT_DATA = BASE_DIR.parent / "casino_data.json"
+DATA_FILE = Path(os.environ.get("CASINO_DATA_FILE", str(DEFAULT_DATA)))
 
+# ---------------------------------------------------------------------------
+# Secrets (CHANGE THESE)
+# ---------------------------------------------------------------------------
+# Secret key for Flask sessions
+SECRET_KEY = os.environ.get("WEBSITE_SECRET_KEY", "change-me-aqua-gems-casino-2026")
 
-STARTUP_COMPLETE = False
+# Shared secret that the Roblox trade/mailbox Lua bot must send with every deposit POST.
+# Put the same value in your Lua script.
+TRADEBOT_SECRET = os.environ.get("TRADEBOT_SECRET", "aqua-tradebot-secret-change-me")
 
-STAFF_ROLE_ID = 1449349282489696297
-ADMIN_USER_IDS = {1215611779774947331}
-VERIFIED_ROLE_ID = 1449349322763145339
-VERIFICATION_CHANNEL_ID = 1449349402002194503
+# Admin key for /api/simulate_deposit and staff actions (keep private)
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "aqua-admin-key-change-me")
 
-COINFLIP_CHANNEL_ID = 1539329155752009819
-GAME_LOG_CHANNEL_ID = 1540706142865330246
-PROFIT_TRACKER_CHANNEL_ID = 1536388275814535209
-TIP_CHANNEL_ID = 1537092723763314689
+# ---------------------------------------------------------------------------
+# Big Games / PS99 official API
+# ---------------------------------------------------------------------------
+BIG_GAMES_BASE = "https://ps99.biggamesapi.io"
+BIG_GAMES_V1 = f"{BIG_GAMES_BASE}/v1"
 
-TIP_ALLOWED_CHANNEL_IDS = {
-    1540705894344564778,
-    1540705815881850923,
-    1540705633660174379,
-}
-TIP_LOG_CHANNEL_ID = 1537092723763314689
+# Roblox users API (username → id)
+ROBLOX_USERS_API = "https://users.roblox.com/v1/usernames/users"
 
-DEPOSIT_LOG_CHANNEL_ID = 1536573870067294301
-WITHDRAW_LOG_CHANNEL_ID = 1536664785599336498
+# ---------------------------------------------------------------------------
+# Casino / bot settings (keep in sync with Discord bot config.py)
+# ---------------------------------------------------------------------------
+# The Roblox username of YOUR deposit bot account (shown to players)
+BOT_ROBLOX_USERNAME = os.environ.get("BOT_ROBLOX_USERNAME", "YourBotUsernameHere")
 
-DEPOSIT_CATEGORY_ID = 1459533708762546219
-WITHDRAW_CATEGORY_ID = 1459533852597948450
+# Minimum deposit / withdraw (same scale as Discord bot — 10M gems)
+MIN_AMOUNT = 10_000_000
 
-DATA_FILE = "casino_data.json"
-
-MIN_GAME_AMOUNT = 10_000_000
-
-MIN_AMOUNT = MIN_GAME_AMOUNT
-
-MILESTONE_ROLES = {
-    500_000_000: 1458426011816562740,
-    1_000_000_000: 1458426285855473873,
-    5_000_000_000: 1458426717755539456,
-    15_000_000_000: 1458427186292719616,
-    30_000_000_000: 1458427481970311260,
-    50_000_000_000: 1458427832303751322,
-    100_000_000_000: 1458428376661491866,
-}
-
-GAME_COOLDOWN_SECONDS = 5.0
-
-SECRET_KEY = os.environ.get("SECRET_KEY", "aqua-dev-secret-change-me")
-TRADEBOT_SECRET = os.environ.get("TRADEBOT_SECRET", "aqua-tradebot-secret")
-ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "aqua-admin-key")
-BOT_ROBLOX_USERNAME = os.environ.get("BOT_ROBLOX_USERNAME", "YourBotUsername")
+# Host / port
 HOST = os.environ.get("HOST", "0.0.0.0")
-PORT = int(os.environ.get("PORT", "25381"))
+PORT = int(os.environ.get("PORT", "8080"))
+
+# Optional: Discord webhook for deposit/withdraw notifications
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
-BIG_GAMES_BASE = os.environ.get(
-    "BIG_GAMES_BASE",
-    "https://ps99.biggamesapi.io",
-)
